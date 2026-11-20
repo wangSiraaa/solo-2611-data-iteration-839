@@ -1,0 +1,25 @@
+{
+  "deeds": [
+    {"deed_id":"D1","revision":1,"case_id":"C-100","seq":10,"period":0,"type":"sale","cadastral_ids":["K-1"],"amount":100,"grade":"A"},
+    {"deed_id":"D2","revision":1,"case_id":"C-100","seq":20,"period":1,"type":"sale","cadastral_ids":["K-7"],"amount":110,"grade":"A"},
+
+    {"deed_id":"D3","revision":1,"case_id":"C-200","seq":10,"period":0,"type":"sale","cadastral_ids":["K-2"],"amount":200,"grade":"B"},
+    {"deed_id":"D4","revision":1,"case_id":"C-200","seq":20,"period":1,"type":"sale","cadastral_ids":["K-21"],"amount":120,"grade":"B"},
+    {"deed_id":"D5","revision":1,"case_id":"C-200","seq":20,"period":1,"type":"sale","cadastral_ids":["K-22"],"amount":80,"grade":"B"},
+
+    {"deed_id":"D6","revision":1,"case_id":"C-300","seq":10,"period":0,"type":"sale","cadastral_ids":["K-3"],"amount":300,"grade":"C"},
+    {"deed_id":"D7","revision":1,"case_id":"C-300","seq":20,"period":1,"type":"sale","cadastral_ids":["K-3"],"amount":350,"grade":"C"},
+
+    {"deed_id":"D8","revision":1,"case_id":"C-400","seq":10,"period":0,"type":"sale","cadastral_ids":["K-4"],"amount":90,"grade":"B"},
+    {"deed_id":"D9","revision":1,"case_id":"C-400","seq":15,"period":1,"type":"bundle","cadastral_ids":["K-4","K-5"],"amount":250,"grade":"B"},
+    {"deed_id":"D10","revision":1,"case_id":"C-400","seq":20,"period":2,"type":"sale","cadastral_ids":["K-4"],"amount":130,"grade":"B"},
+
+    {"deed_id":"D11","revision":1,"case_id":"C-500","seq":10,"period":0,"type":"sale","cadastral_ids":["K-6"],"amount":500,"grade":"A"},
+    {"deed_id":"D12","revision":1,"case_id":"C-500","seq":20,"period":1,"type":"sale","cadastral_ids":["K-6"],"amount":520,"grade":"A"},
+    {"deed_id":"D12","revision":2,"case_id":"C-500","seq":20,"period":1,"type":"sale","cadastral_ids":["K-6"],"amount":515,"grade":"A"},
+    {"deed_id":"D13","revision":1,"case_id":"C-500","seq":30,"period":2,"type":"sale","cadastral_ids":["K-6"],"amount":560,"grade":"A"},
+    {"deed_id":"D14","revision":1,"case_id":"C-500","seq":40,"period":3,"type":"sale","cadastral_ids":["K-6"],"amount":600,"grade":"A"},
+    {"deed_id":"D14","revision":2,"case_id":"C-500","seq":40,"period":3,"type":"sale","cadastral_ids":["K-6"],"amount":600,"grade":"A","status":"revoked"},
+    {"deed_id":"D15","revision":1,"case_id":"C-500","seq":50,"period":4,"type":"partial_interest","cadastral_ids":["K-6"],"amount":300,"grade":"A"}
+  ]
+}

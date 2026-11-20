@@ -25,6 +25,7 @@ import json
 import os
 import sys
 
+from .deeds import DeedStore, import_deed_materials, index_as_json
 from .handoff_service import HandoffRepo
 from .materials import import_materials
 from .models import RejectError
@@ -36,6 +37,10 @@ def _paths(data_dir: str) -> tuple[str, str]:
         os.path.join(data_dir, "rules_events.sqlite"),
         os.path.join(data_dir, "handoff.sqlite"),
     )
+
+
+def _deed_path(data_dir: str) -> str:
+    return os.path.join(data_dir, "deeds.sqlite")
 
 
 def _open(data_dir: str, live: bool = True) -> tuple[RuleEventStore, HandoffRepo]:
@@ -192,6 +197,119 @@ def cmd_staleness(args) -> None:
     rules.close()
     handoff.close()
     _dump(result)
+
+
+def _open_deeds(data_dir: str) -> DeedStore:
+    os.makedirs(data_dir, exist_ok=True)
+    return DeedStore(_deed_path(data_dir))
+
+
+def _pins(values) -> dict:
+    out = {}
+    for item in values or []:
+        if "=" not in item:
+            raise SystemExit(f"pin must be ID=REVISION, got {item!r}")
+        key, rev = item.split("=", 1)
+        try:
+            out[key] = int(rev)
+        except ValueError:
+            raise SystemExit(f"revision must be an integer in {item!r}")
+    return out
+
+
+def cmd_deed_import(args) -> None:
+    """Import fictional deeds and cadastral changes (append-only revisions)."""
+    store = _open_deeds(args.data)
+    try:
+        result = import_deed_materials(store, args.materials)
+    except RejectError as exc:
+        store.close()
+        _dump({"accepted": False, "code": exc.code, "detail": exc.detail})
+        raise SystemExit(2)
+    store.close()
+    _dump({"accepted": True, "materials": os.path.abspath(args.materials), **result})
+
+
+def cmd_evidence(args) -> None:
+    """Build adjacent repeat-sale evidence (optionally reopening old revisions)."""
+    from .deeds import evidence_as_json
+
+    store = _open_deeds(args.data)
+    try:
+        report = store.build_evidence(
+            deed_pins=_pins(args.deed_rev), event_pins=_pins(args.event_rev)
+        )
+    except RejectError as exc:
+        store.close()
+        _dump({"accepted": False, "code": exc.code, "detail": exc.detail})
+        raise SystemExit(2)
+    store.close()
+    _dump(evidence_as_json(report))
+
+
+def cmd_index(args) -> None:
+    """Solve the exact additive index from stored evidence."""
+    store = _open_deeds(args.data)
+    weights = {}
+    for item in args.weight or []:
+        if "=" not in item:
+            store.close()
+            raise SystemExit(f"weight must be EVIDENCE_ID=W, got {item!r}")
+        key, value = item.split("=", 1)
+        weights[key] = value
+    grade_weights = {}
+    for item in args.grade_weight or []:
+        if "=" not in item:
+            store.close()
+            raise SystemExit(f"grade weight must be GRADE=W, got {item!r}")
+        key, value = item.split("=", 1)
+        grade_weights[key] = value
+    try:
+        result = store.build_index(
+            base=args.base,
+            weights=weights,
+            grade_weights=grade_weights,
+            exclude_grades=args.exclude_grade or (),
+            deed_pins=_pins(args.deed_rev),
+            event_pins=_pins(args.event_rev),
+        )
+    except RejectError as exc:
+        store.close()
+        _dump({"accepted": False, "code": exc.code, "detail": exc.detail})
+        raise SystemExit(2)
+    store.close()
+    _dump(index_as_json(result))
+
+
+def cmd_verify_deeds(args) -> None:
+    """Check that stored revisions fold deterministically and evidence builds."""
+    store = _open_deeds(args.data)
+    try:
+        report = store.build_evidence()
+        deed_ids = [r["deed_id"] for r in store.conn.execute(
+            "SELECT DISTINCT deed_id FROM deed_revisions ORDER BY deed_id")]
+        revision_count = sum(len(store.deed_revisions(d)) for d in deed_ids)
+    except RejectError as exc:
+        store.close()
+        _dump({"ok": False, "code": exc.code, "detail": exc.detail})
+        raise SystemExit(1)
+    store.close()
+    _dump({
+        "ok": True,
+        "deed_revisions": revision_count,
+        "evidence": len(report["evidence"]),
+        "excluded": len(report["excluded"]),
+    })
+
+
+def cmd_demo_repeat_sale(args) -> None:
+    """Documented repeat-sale walkthrough over materials/752 (writes artifacts)."""
+    from .scenario import run_repeat_sale
+
+    result = run_repeat_sale(args.data, materials=args.materials)
+    _dump(result)
+    if not result.get("ok"):
+        raise SystemExit(1)
 
 
 def cmd_status(args) -> None:
@@ -424,6 +542,33 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file", required=True)
     sp.add_argument("--allow-rejects", action="store_true")
     sp.set_defaults(func=cmd_requests)
+
+    sp = sub.add_parser("deed-import")
+    sp.add_argument("--materials", required=True)
+    sp.set_defaults(func=cmd_deed_import)
+
+    sp = sub.add_parser("evidence")
+    sp.add_argument("--deed-rev", action="append",
+                    help="reopen a deed revision, ID=REVISION")
+    sp.add_argument("--event-rev", action="append",
+                    help="reopen a cadastral event revision, ID=REVISION")
+    sp.set_defaults(func=cmd_evidence)
+
+    sp = sub.add_parser("index")
+    sp.add_argument("--base", type=int, default=0)
+    sp.add_argument("--weight", action="append", help="evidence weight, EVIDENCE_ID=W")
+    sp.add_argument("--grade-weight", action="append", help="grade weight, GRADE=W")
+    sp.add_argument("--exclude-grade", action="append", help="drop evidence of this grade")
+    sp.add_argument("--deed-rev", action="append")
+    sp.add_argument("--event-rev", action="append")
+    sp.set_defaults(func=cmd_index)
+
+    sp = sub.add_parser("verify-deeds")
+    sp.set_defaults(func=cmd_verify_deeds)
+
+    sp = sub.add_parser("repeat-sale")
+    sp.add_argument("--materials", default="materials/752")
+    sp.set_defaults(func=cmd_demo_repeat_sale)
     return p
 
 

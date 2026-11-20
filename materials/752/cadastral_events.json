@@ -1,0 +1,7 @@
+{
+  "cadastral_events": [
+    {"event_id":"E1","revision":1,"case_id":"C-100","seq":15,"type":"rename","sources":["K-1"],"targets":["K-7"]},
+    {"event_id":"E2","revision":1,"case_id":"C-200","seq":15,"type":"split","sources":["K-2"],"targets":["K-21","K-22"]},
+    {"event_id":"E3","revision":1,"case_id":"C-300","seq":15,"type":"alteration","sources":["K-3"],"targets":["K-3"]}
+  ]
+}

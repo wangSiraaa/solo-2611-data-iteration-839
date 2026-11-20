@@ -193,6 +193,141 @@ def run_scenario(data_dir: str, materials: str = "materials/751") -> dict:
 
 
 # --------------------------------------------------------------------------
+# Repeat-sale evidence walkthrough (materials/752).
+# --------------------------------------------------------------------------
+def run_repeat_sale(data_dir: str, materials: str = "materials/752") -> dict:
+    """Documented repeat-sale walkthrough.
+
+    Demonstrates the three required behaviours:
+
+    1. **old revision reopened** -- D12 has rev1=520 and rev2=515.  The
+       default (latest) revisions are used first, then ``deed_pins={"D12": 1}``
+       reopens the superseded revision without losing either, and the resulting
+       delta changes from 15 to 20;
+    2. **pure rename continues** -- E1 renames K-1 to K-7; the physical property
+       is unchanged, so D1 and D2 still form one adjacent 0->1 repeat sale;
+    3. **unallocated bundle yields nothing** -- D9 packs K-4 and K-5 with no
+       allocation, so it produces no single-property price and no physical
+       change; D8 and D10 remain adjacent, giving 0->2.
+
+    Everything is fictional; both revisions and the revoked deed stay on disk.
+    """
+    from .deeds import DeedStore, evidence_as_json, import_deed_materials, index_as_json
+
+    os.makedirs(data_dir, exist_ok=True)
+    store = DeedStore(os.path.join(data_dir, "deeds.sqlite"))
+    artifacts = os.path.join(data_dir, "artifacts")
+    os.makedirs(artifacts, exist_ok=True)
+    steps: list[dict] = []
+
+    imported = import_deed_materials(store, materials)
+    steps.append({"step": "import", "result": imported})
+
+    default = store.build_index(base=0)
+    steps.append({
+        "step": "default_latest_revisions",
+        "evidence": [
+            {"evidence_id": e["evidence_id"], "property_id": e["property_id"],
+             "period_s": e["period_s"], "period_t": e["period_t"],
+             "delta": e["delta_str"], "grade": e["grade"]}
+            for e in default["evidence"]["evidence"]
+        ],
+        "index": default["index"]["index_str"],
+        "excluded": default["evidence"]["excluded"],
+    })
+
+    # 1) Reopen the superseded D12 revision 1 (520 instead of 515).
+    reopened = store.build_index(base=0, deed_pins={"D12": 1})
+    default_by_deed = {e["deed_t"]: e for e in default["evidence"]["evidence"]}
+    reopened_by_deed = {e["deed_t"]: e for e in reopened["evidence"]["evidence"]}
+    steps.append({
+        "step": "reopen_D12_rev1",
+        "note": "both revisions retained; only the effective one changes",
+        "D12_revisions": [
+            {"revision": r.revision, "amount": str(r.amount)}
+            for r in store.deed_revisions("D12")
+        ],
+        "delta_0_1": reopened_by_deed["D12"]["delta_str"],
+        "index": reopened["index"]["index_str"],
+    })
+
+    # 2) Pure rename: K-1 and K-7 are the same physical property.
+    rename_prop = next(p for p in default["evidence"]["properties"]
+                       if p["property_id"] == "P:K-1")
+    steps.append({
+        "step": "pure_rename_continues",
+        "event": "E1 K-1->K-7 (rename)",
+        "property_id": rename_prop["property_id"],
+        "current_label": rename_prop["cadastral_id"],
+        "sales": [s["deed_id"] for s in rename_prop["sales"]],
+        "evidence_ids": rename_prop["evidence_ids"],
+    })
+
+    # 3) Bundle without allocation contributes no price and no physical change.
+    bundle = next(e for e in default["evidence"]["excluded"]
+                  if e["deed_id"] == "D9")
+    k4 = next(p for p in default["evidence"]["properties"] if p["property_id"] == "P:K-4")
+    steps.append({
+        "step": "unallocated_bundle",
+        "deed": "D9",
+        "reason": bundle["reason"],
+        "K4_sales": [s["deed_id"] for s in k4["sales"]],
+        "K4_evidence_ids": k4["evidence_ids"],
+        "K5_sales": next(p for p in default["evidence"]["properties"]
+                         if p["property_id"] == "P:K-5")["sales"],
+    })
+
+    # Exact-fraction demonstration of the solver's worked examples.
+    from .index_service import solve_additive_index
+
+    toy = [
+        {"evidence_id": "e01", "s": 0, "t": 1, "d": 10},
+        {"evidence_id": "e12", "s": 1, "t": 2, "d": 10},
+        {"evidence_id": "e02", "s": 0, "t": 2, "d": 26},
+    ]
+    steps.append({
+        "step": "worked_examples",
+        "equal_weights": solve_additive_index(toy)["index_str"],
+        "split_third_dropped": solve_additive_index(toy[:2])["index_str"],
+        "third_weight_2": solve_additive_index(toy, weights={"e02": 2})["index_str"],
+    })
+
+    # Write artifacts (exact strings, no floats).
+    with open(os.path.join(artifacts, "evidence.json"), "w", encoding="utf-8") as fh:
+        json.dump(evidence_as_json(default["evidence"]), fh,
+                  ensure_ascii=False, indent=2, sort_keys=True)
+        fh.write("\n")
+    with open(os.path.join(artifacts, "index.json"), "w", encoding="utf-8") as fh:
+        json.dump(index_as_json(default), fh, ensure_ascii=False, indent=2, sort_keys=True)
+        fh.write("\n")
+
+    expected = {
+        "rename_is_one_property": rename_prop["property_id"] == "P:K-1"
+        and rename_prop["cadastral_id"] == "K-7"
+        and rename_prop["evidence_ids"] == ["RS:P:K-1:D1:D2"],
+        "bundle_excluded": bundle["reason"] == "bundle_unallocated",
+        "bundle_no_property_change": [s["deed_id"] for s in k4["sales"]] == ["D8", "D10"],
+        "default_delta_0_1": default_by_deed["D12"]["delta_str"] == "15",
+        "reopened_delta_0_1": reopened_by_deed["D12"]["delta_str"] == "20",
+        "revoked_D14_absent": all(e["deed_t"] != "D14" and e["deed_s"] != "D14"
+                                  for e in default["evidence"]["evidence"]),
+        "worked_examples_ok": (
+            steps[-1]["equal_weights"] == {0: "0", 1: "12", 2: "24"}
+            and steps[-1]["split_third_dropped"] == {0: "0", 1: "10", 2: "20"}
+            and steps[-1]["third_weight_2"] == {0: "0", 1: "62/5", 2: "124/5"}
+        ),
+    }
+    store.close()
+    ok = all(expected.values())
+    result = {"ok": ok, "data_dir": os.path.abspath(data_dir),
+              "expected": expected, "steps": steps}
+    with open(os.path.join(artifacts, "repeat_sale.json"), "w", encoding="utf-8") as fh:
+        json.dump(result, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        fh.write("\n")
+    return result
+
+
+# --------------------------------------------------------------------------
 # Scaling dataset: 200 docs / 10 rules / 500 events+holds / 100 requests.
 # --------------------------------------------------------------------------
 def generate_scale(directory: str, docs: int = 200, rules_count: int = 10,

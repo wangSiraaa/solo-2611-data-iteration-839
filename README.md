@@ -11,8 +11,83 @@ archive_handoff/
   materials.py       # 只读导入 materials/751 或任意同布局目录
   scenario.py        # 文档化 751 走查、operations 回放、200/10/500/100 规模生成
   cli.py             # 命令行
+  # ---- 复售证据与跨期价差 ----
+  index_service.py   # 精确分数的加法（复售）指数：加权最小二乘 + 连通分量
+  deeds.py           # 契据/地籍变动 → 实物身份 → 相邻两次合格成交的复售证据
 tests/               # unittest（无需 pytest）
 ```
+
+## 复售证据与加法指数
+
+在既有约定（稳定 ID、单调 `revision`、追加式历史、冻结产品）之上新增两层：
+
+- `deeds.py` 从契据与地籍变动重建**实物身份**，输出每个可比段的相邻复售证据。
+- `index_service.py` 把证据当作 `s→t` 的价差边，精确求解加法指数。
+
+### 实物身份（`deeds.py`）
+
+- 地籍号只是**标签**；`property_id`（实物号）与档案 `deed_id`（契据号）分别保留，
+  更名后实物号不变、当前标签更新。
+- **纯更名** `rename`（1→1）延续同一实物，可比段跨新号继续。
+- **拆分** `split`、**合并** `merge`、**实质改建** `alteration` 终止此前可比段并新建实物；
+  改建即使沿用旧号（`K-3→K-3`）也视为新实物。
+- **打包契据** `bundle`、**部分产权转让** `partial_interest` 不产生单宗价格；
+  打包契据只有在 `allocations` 为每宗都给出正金额时才拆出单宗价。
+  这两种交易本身**不造成实物变动**。
+- 仅整宗独立出售有可用总价；撤销（revoked）契据不产生证据。
+- 每个实物按发生顺序排序，只把**相邻**两次合格成交配对；不跨段、不跳选长区间。
+  证据给出期号 `period_s/period_t`、精确价差 `delta`、`evidence_id` 与两次成交中
+  **较弱**的史料等级。
+- 同一实物同一顺序出现互斥变动（如对同一地籍号同时更名与拆分）时拒绝构建，
+  `conflicting_change` 的明细列出涉及的**原件**（事件/契据 ID、revision、顺序）。
+
+### 精确加法指数（`index_service.py`）
+
+对每条纳入证据求解
+
+```
+minimise  Σ w_e · (x_t − x_s − d_e)²      subject to  x_base = 0
+```
+
+- 权重为正有理数（`int`/`"62/5"`/`Fraction`）；可按 `evidence_id` 指定，或按等级给
+  `grade_weights`（证据自身权重优先），并按等级排除证据。
+- 全流程 `Fraction` 精确运算，输出**精确分数串**：`0`、`12`、`62/5`。
+- 期次仅在通过纳入证据与基期连通时有值；其余分量报告为 `disconnected_periods`，
+  其逐证据残差仍然有定义（残差平移不变）。换基期只是整体平移。
+
+数例（与需求一致）：`0→1 +10`、`1→2 +10`、`0→2 +26`，等权基期 0 →
+
+| 情形 | 指数 |
+| --- | --- |
+| 三宗全用 | `0, 12, 24`（残差 `2, 2, −2`） |
+| 去掉第三宗 | `0, 10, 20` |
+| 第三宗权重 2 | `0, 62/5, 124/5` |
+
+### 命令
+
+```bash
+DATA=artifacts/repeat
+
+# 导入虚构契据与地籍变动（materials/752）
+python3 -m archive_handoff.cli --data $DATA deed-import --materials materials/752
+
+# 只构建复售证据（可选 --deed-rev D12=1 重开旧版）
+python3 -m archive_handoff.cli --data $DATA evidence
+
+# 精确加法指数：换基期、逐证据/按等级加权、按等级排除
+python3 -m archive_handoff.cli --data $DATA index --base 0 \
+  --weight 'RS:P:K-4:D8:D10=2' --grade-weight A=3 --exclude-grade C
+python3 -m archive_handoff.cli --data $DATA index --deed-rev D12=1
+
+# 自检 + 文档化走查（旧版重开、纯更名延续、未拆价契据）
+python3 -m archive_handoff.cli --data $DATA verify-deeds
+python3 -m archive_handoff.cli --data $DATA repeat-sale --materials materials/752
+```
+
+`materials/752` 是随附的虚构样张：C-100 演示更名延续，C-200 演示拆分终止，
+C-300 演示沿用旧号的改建终止，C-400 演示未拆价打包契据（不产生价格也不变实物），
+C-500 演示订正版、旧版重开、撤销契据与部分产权转让。
+
 
 ## 核心规则（规则/事件侧）
 
